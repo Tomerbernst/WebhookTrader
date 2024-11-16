@@ -20,7 +20,7 @@ function initializeIBKR() {
     return new Promise((resolve, reject) => {
         ib.once('connected', () => {
             console.log('Connected to IBKR API');
-            ib.reqIds(1); // Request the next valid order ID
+            ib.reqIds(1); // Req
             ib.once('nextValidId', (id) => {
                 orderId = id;
                 console.log(`Received order ID: ${orderId}`);

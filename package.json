@@ -12,6 +12,10 @@
   "dependencies": {
     "body-parser": "^1.20.3",
     "express": "^4.21.1",
-    "ib": "^0.2.9"
+    "ib": "^0.2.9",
+    "yahoo-finance2": "^2.13.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
   }
 }
