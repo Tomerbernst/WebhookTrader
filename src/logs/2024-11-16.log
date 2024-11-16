@@ -1,0 +1,28 @@
+[2024-11-16T14:53:01.227Z] Received request: {"ticker":"QQQ","action":"BUY","position_size":"10"}
+[2024-11-16T14:53:01.229Z] Initializing IBKR connection...
+[2024-11-16T14:53:01.245Z] Connected to IBKR API
+[2024-11-16T14:53:01.268Z] Placing order with contract:
+[2024-11-16T14:53:01.267Z] Non-critical error:
+[2024-11-16T14:53:01.269Z] Order result: {"success":true,"message":"Order submitted successfully. Waiting for status updates.","orderId":29}
+[2024-11-16T14:53:01.267Z] Received order ID: 29
+[2024-11-16T14:53:01.268Z] Order details:
+[2024-11-16T14:53:11.318Z] Initializing IBKR connection...
+[2024-11-16T14:53:11.318Z] Received request: {"ticker":"QQQ","action":"BUY","position_size":"10"}
+[2024-11-16T14:53:11.318Z] Already connected to IBKR API
+[2024-11-16T14:53:11.318Z] Order result: {"success":true,"message":"Order submitted successfully. Waiting for status updates.","orderId":30}
+[2024-11-16T14:53:11.318Z] Order details:
+[2024-11-16T14:53:11.318Z] Placing order with contract:
+[2024-11-16T14:58:27.608Z] Received request: {"ticker":"QQQ","action":"BUY","position_size":"10"}
+[2024-11-16T14:58:27.609Z] Initializing IBKR connection...
+[2024-11-16T14:58:27.626Z] Connected to IBKR API
+[2024-11-16T14:58:27.651Z] Received order ID: 31
+[2024-11-16T14:58:27.651Z] Placing order with contract:
+[2024-11-16T14:58:27.652Z] Order result: {"success":true,"message":"Order submitted successfully. Waiting for status updates.","orderId":31}
+[2024-11-16T14:58:27.651Z] Order details:
+[2024-11-16T14:58:27.656Z] Non-critical error:
+[2024-11-16T14:58:34.442Z] Received request: {"ticker":"QQQ","action":"BUY","position_size":"10"}
+[2024-11-16T14:58:34.442Z] Initializing IBKR connection...
+[2024-11-16T14:58:34.442Z] Already connected to IBKR API
+[2024-11-16T14:58:34.443Z] Order details:
+[2024-11-16T14:58:34.443Z] Placing order with contract:
+[2024-11-16T14:58:34.443Z] Order result: {"success":true,"message":"Order submitted successfully. Waiting for status updates.","orderId":32}
