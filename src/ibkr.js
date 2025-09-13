@@ -1,12 +1,12 @@
 const IB = require('ib');
-const { logMessage } = require('./logger');
+const {logMessage} = require('./logger');
+const { IB_HOST, IB_PORT, IB_CLIENT_ID } = require('./config');
 
 const ib = new IB({
-    clientId: 1001,
-    host: '127.0.0.1',
-    port: 7496
+    clientId: IB_CLIENT_ID,
+    host: IB_HOST,
+    port: IB_PORT
 });
-
 let orderId = null;
 let isConnected = false;
 let isConnecting = false;
@@ -37,7 +37,9 @@ async function initializeIBKR() {
             resolve();
         });
 
-        ib.on('disconnected', () => { isConnected = false; });
+        ib.on('disconnected', () => {
+            isConnected = false;
+        });
         ib.on('error', (err) => {
             const msg = String(err?.message || err);
             if (msg.toLowerCase().includes('farm connection is ok')) return; // noise
@@ -49,12 +51,12 @@ async function initializeIBKR() {
 }
 
 function makeStockContract(ticker, exchange = 'SMART', currency = 'USD') {
-    return { symbol: ticker, secType: 'STK', exchange, currency };
+    return {symbol: ticker, secType: 'STK', exchange, currency};
 }
 
-function makeFutureBase({ ticker, month, exchange = 'CME', currency = 'USD', localSymbol, tradingClass, conId }) {
-    if (conId) return { conId: Number(conId), secType: 'FUT', exchange };
-    const c = { secType: 'FUT', exchange };
+function makeFutureBase({ticker, month, exchange = 'CME', currency = 'USD', localSymbol, tradingClass, conId}) {
+    if (conId) return {conId: Number(conId), secType: 'FUT', exchange};
+    const c = {secType: 'FUT', exchange};
     if (ticker) c.symbol = ticker;
     if (currency) c.currency = currency;
     if (month) c.lastTradeDateOrContractMonth = month;
@@ -68,7 +70,9 @@ function resolveFutureContract(base) {
         const reqId = Date.now() % 2147483647;
         const found = [];
 
-        const onDetails = (id, details) => { if (id === reqId) found.push(details); };
+        const onDetails = (id, details) => {
+            if (id === reqId) found.push(details);
+        };
         const onEnd = (id) => {
             if (id !== reqId) return;
             ib.off('contractDetails', onDetails);
@@ -90,7 +94,7 @@ function resolveFutureContract(base) {
     });
 }
 
-function buildOrder({ action, qty, orderType = 'MKT', price, tif = 'DAY', outsideRth = false, mode = 'live' }) {
+function buildOrder({action, qty, orderType = 'MKT', price, tif = 'DAY', outsideRth = false, mode = 'live'}) {
     const o = {
         action: action.toUpperCase(),
         totalQuantity: Number(qty),
@@ -107,7 +111,10 @@ function buildOrder({ action, qty, orderType = 'MKT', price, tif = 'DAY', outsid
     // modes: live | stage | preview
     const m = String(mode).toLowerCase();
     if (m === 'stage') o.transmit = false;
-    if (m === 'preview') { o.whatIf = true; o.transmit = true; }
+    if (m === 'preview') {
+        o.whatIf = true;
+        o.transmit = true;
+    }
 
     return o;
 }
@@ -123,8 +130,15 @@ function previewOrder(contract, order) {
         const tmpId = orderId++;
         let state;
 
-        const onOpen = (id, c, o, s) => { if (id === tmpId) state = s; };
-        const onStatus = (id) => { if (id === tmpId) { cleanup(); resolve({ state }); } };
+        const onOpen = (id, c, o, s) => {
+            if (id === tmpId) state = s;
+        };
+        const onStatus = (id) => {
+            if (id === tmpId) {
+                cleanup();
+                resolve({state});
+            }
+        };
         const cleanup = () => {
             ib.removeListener('openOrder', onOpen);
             ib.removeListener('orderStatus', onStatus);
@@ -132,7 +146,7 @@ function previewOrder(contract, order) {
 
         ib.on('openOrder', onOpen);
         ib.on('orderStatus', onStatus);
-        ib.placeOrder(tmpId, contract, { ...order, whatIf: true, transmit: true });
+        ib.placeOrder(tmpId, contract, {...order, whatIf: true, transmit: true});
     });
 }
 
@@ -169,17 +183,17 @@ async function placeOrder(data) {
         contract = makeStockContract(sym, data.exchange || 'SMART', data.currency || 'USD');
     }
 
-    const order = buildOrder({ action, qty, orderType, price, tif: data.tif || 'DAY', outsideRth, mode });
+    const order = buildOrder({action, qty, orderType, price, tif: data.tif || 'DAY', outsideRth, mode});
 
     if (String(mode).toLowerCase() === 'preview') {
-        const { state = {} } = await previewOrder(contract, order);
-        return { success: true, mode: 'preview', state };
+        const {state = {}} = await previewOrder(contract, order);
+        return {success: true, mode: 'preview', state};
     }
 
     const thisOrderId = orderId++;
     if (String(mode).toLowerCase() === 'stage') {
         ib.placeOrder(thisOrderId, contract, order);
-        return { success: true, mode: 'stage', orderId: thisOrderId };
+        return {success: true, mode: 'stage', orderId: thisOrderId};
     }
 
     return new Promise((resolve, reject) => {
@@ -188,7 +202,7 @@ async function placeOrder(data) {
             logMessage(`Order ${id} status: ${status} filled=${filled} remaining=${remaining} avg=${avgFillPrice}`);
             if (['Filled', 'Cancelled', 'Inactive', 'Rejected'].includes(status)) {
                 ib.removeListener('orderStatus', onStatus);
-                resolve({ success: status === 'Filled', orderId: id, status, avgFillPrice });
+                resolve({success: status === 'Filled', orderId: id, status, avgFillPrice});
             }
         };
         ib.on('orderStatus', onStatus);
