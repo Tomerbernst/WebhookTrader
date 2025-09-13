@@ -1,8 +1,9 @@
 {
   "name": "webhooktrader",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
+    "dev": "nodemon src/app.js",
+    "start": "node src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,11 +12,11 @@
   "description": "",
   "dependencies": {
     "body-parser": "^1.20.3",
+    "dotenv": "^17.2.2",
     "express": "^4.21.1",
-    "ib": "^0.2.9",
-    "yahoo-finance2": "^2.13.2"
+    "ib": "^0.2.9"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7"
+    "nodemon": "^3.1.10"
   }
 }

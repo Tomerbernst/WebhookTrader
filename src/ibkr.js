@@ -1,132 +1,204 @@
-const { logMessage } = require('./logger');
-
 const IB = require('ib');
+const { logMessage } = require('./logger');
 
 const ib = new IB({
     clientId: 1001,
-    host: 'localhost',
-    port: 7496 // Use 7496 for live trading, 7497 for paper trading
+    host: '127.0.0.1',
+    port: 7496
 });
 
 let orderId = null;
-let isConnected = false; // Centralized connection state
-let isConnecting = false; // Prevent multiple simultaneous connections
+let isConnected = false;
+let isConnecting = false;
 
 async function initializeIBKR() {
     return new Promise((resolve, reject) => {
-        if (isConnected) {
-            logMessage('Already connected to IBKR API');
-            return resolve(); // Skip reconnection
-        }
-
-        if (isConnecting) {
-            logMessage('Connection in progress...');
-            return resolve(); // Wait for ongoing connection
-        }
+        if (isConnected) return resolve();
+        if (isConnecting) return resolve();
 
         isConnecting = true;
 
-        const timeout = setTimeout(() => {
+        const t = setTimeout(() => {
             isConnecting = false;
             reject(new Error('Connection to IBKR API timed out'));
-        }, 10000); // Timeout after 10 seconds
+        }, 10000);
 
         ib.once('connected', () => {
-            clearTimeout(timeout);
-            logMessage('Connected to IBKR API');
+            clearTimeout(t);
             isConnected = true;
             isConnecting = false;
-
-            // Request the next valid order ID
+            logMessage('Connected to IBKR API');
             ib.reqIds(1);
-            ib.once('nextValidId', (id) => {
-                orderId = id;
-                logMessage(`Received order ID: ${orderId}`);
-                resolve();
-            });
         });
 
-        ib.once('error', (err) => {
-            clearTimeout(timeout);
-            if (err.message.includes('Market data farm connection is OK')) {
-                logMessage('Non-critical error:', err.message);
-                return; // Ignore non-critical messages
-            }
-            console.error('Critical error during IBKR initialization:', err.message);
-            isConnected = false;
-            isConnecting = false;
-            reject(err);
+        ib.once('nextValidId', (id) => {
+            orderId = id;
+            logMessage(`nextValidId: ${orderId}`);
+            resolve();
         });
 
-        ib.once('disconnected', () => {
-            logMessage('Disconnected from IBKR API');
-            isConnected = false;
+        ib.on('disconnected', () => { isConnected = false; });
+        ib.on('error', (err) => {
+            const msg = String(err?.message || err);
+            if (msg.toLowerCase().includes('farm connection is ok')) return; // noise
+            console.error('IBKR error:', msg);
         });
 
         ib.connect();
     });
 }
 
-function placeOrder(data) {
+function makeStockContract(ticker, exchange = 'SMART', currency = 'USD') {
+    return { symbol: ticker, secType: 'STK', exchange, currency };
+}
+
+function makeFutureBase({ ticker, month, exchange = 'CME', currency = 'USD', localSymbol, tradingClass, conId }) {
+    if (conId) return { conId: Number(conId), secType: 'FUT', exchange };
+    const c = { secType: 'FUT', exchange };
+    if (ticker) c.symbol = ticker;
+    if (currency) c.currency = currency;
+    if (month) c.lastTradeDateOrContractMonth = month;
+    if (localSymbol) c.localSymbol = localSymbol;
+    if (tradingClass) c.tradingClass = tradingClass;
+    return c;
+}
+
+function resolveFutureContract(base) {
     return new Promise((resolve, reject) => {
-        if (!orderId) {
-            return reject(new Error('Order ID not initialized'));
-        }
+        const reqId = Date.now() % 2147483647;
+        const found = [];
 
-        const contract = {
-            symbol: data.ticker,
-            secType: 'STK',
-            exchange: 'SMART',
-            currency: 'USD',
+        const onDetails = (id, details) => { if (id === reqId) found.push(details); };
+        const onEnd = (id) => {
+            if (id !== reqId) return;
+            ib.off('contractDetails', onDetails);
+            ib.off('contractDetailsEnd', onEnd);
+
+            if (!found.length) return reject(new Error('No contract found for FUT'));
+            const summaries = found.map(d => d.summary).filter(Boolean);
+            if (!summaries.length) return reject(new Error('Contract details received without summary'));
+
+            const contract = summaries[0];
+            contract.secType = 'FUT';
+            contract.exchange = base.exchange || 'CME';
+            resolve(contract);
         };
 
-        const order = {
-            action: data.action.toUpperCase(),
-            orderType: 'MKT',
-            totalQuantity: parseFloat(data.position_size) || 1,
+        ib.on('contractDetails', onDetails);
+        ib.on('contractDetailsEnd', onEnd);
+        ib.reqContractDetails(reqId, base);
+    });
+}
+
+function buildOrder({ action, qty, orderType = 'MKT', price, tif = 'DAY', outsideRth = false, mode = 'live' }) {
+    const o = {
+        action: action.toUpperCase(),
+        totalQuantity: Number(qty),
+        orderType: orderType.toUpperCase(),
+        tif,
+        outsideRth: !!outsideRth,
+        transmit: true
+    };
+    if (o.orderType === 'LMT') {
+        if (price == null) throw new Error('LMT order requires "price"');
+        o.lmtPrice = Number(price);
+    }
+
+    // modes: live | stage | preview
+    const m = String(mode).toLowerCase();
+    if (m === 'stage') o.transmit = false;
+    if (m === 'preview') { o.whatIf = true; o.transmit = true; }
+
+    return o;
+}
+
+function inferAssetType(d) {
+    if (d.assetType) return String(d.assetType).toUpperCase();
+    if (d.month || d.expiry || d.localSymbol || d.conId) return 'FUT';
+    return 'STK';
+}
+
+function previewOrder(contract, order) {
+    return new Promise((resolve) => {
+        const tmpId = orderId++;
+        let state;
+
+        const onOpen = (id, c, o, s) => { if (id === tmpId) state = s; };
+        const onStatus = (id) => { if (id === tmpId) { cleanup(); resolve({ state }); } };
+        const cleanup = () => {
+            ib.removeListener('openOrder', onOpen);
+            ib.removeListener('orderStatus', onStatus);
         };
 
-        logMessage('Placing order with contract:', contract);
-        logMessage('Order details:', order);
+        ib.on('openOrder', onOpen);
+        ib.on('orderStatus', onStatus);
+        ib.placeOrder(tmpId, contract, { ...order, whatIf: true, transmit: true });
+    });
+}
 
-        // Place the order
-        ib.placeOrder(orderId++, contract, order);
+async function placeOrder(data) {
+    if (!orderId) throw new Error('Order ID not initialized (call initializeIBKR first)');
 
-        // Respond immediately after submitting the order
-        resolve({
-            success: true,
-            message: 'Order submitted successfully. Waiting for status updates.',
-            orderId: orderId - 1,
+    const action = String(data.action || '').toUpperCase();
+    const qty = Number(data.position_size || 1);
+    const orderType = (data.orderType || 'MKT').toUpperCase();
+    const price = data.price != null ? Number(data.price) : undefined;
+    const outsideRth = Boolean(data.outsideRth);
+    const mode = data.mode || 'live'; // 'live' | 'stage' | 'preview'
+
+    if (!['BUY', 'SELL'].includes(action)) throw new Error('Invalid action (BUY/SELL)');
+    if (!data.ticker) throw new Error('ticker required');
+    if (!(qty > 0)) throw new Error('position_size must be > 0');
+
+    const assetType = inferAssetType(data);
+    let contract;
+
+    if (assetType === 'FUT') {
+        const base = makeFutureBase({
+            ticker: data.ticker,
+            month: data.month || data.expiry,
+            exchange: data.exchange || 'CME',
+            currency: data.currency || 'USD',
+            localSymbol: data.localSymbol,
+            tradingClass: data.tradingClass || data.ticker,
+            conId: data.conId
         });
+        contract = base.conId ? base : await resolveFutureContract(base);
+    } else {
+        const sym = String(data.ticker).split(':').pop();
+        contract = makeStockContract(sym, data.exchange || 'SMART', data.currency || 'USD');
+    }
 
-        // Handle order status updates asynchronously
-        ib.on('orderStatus', (id, status, filled, remaining, avgFillPrice) => {
-            logMessage(`Order Status Update: ${status}`);
-            logMessage({
-                orderId: id,
-                status: status,
-                filled: filled,
-                remaining: remaining,
-                avgFillPrice: avgFillPrice,
-            });
-        });
+    const order = buildOrder({ action, qty, orderType, price, tif: data.tif || 'DAY', outsideRth, mode });
 
-        // Catch errors during the process
-        ib.once('error', (err) => {
-            // Ignore non-critical messages
-            if (err.message.includes('data farm connection is OK')) {
-                console.log('Non-critical message:', err.message);
-                return; // Skip processing this as an error
+    if (String(mode).toLowerCase() === 'preview') {
+        const { state = {} } = await previewOrder(contract, order);
+        return { success: true, mode: 'preview', state };
+    }
+
+    const thisOrderId = orderId++;
+    if (String(mode).toLowerCase() === 'stage') {
+        ib.placeOrder(thisOrderId, contract, order);
+        return { success: true, mode: 'stage', orderId: thisOrderId };
+    }
+
+    return new Promise((resolve, reject) => {
+        const onStatus = (id, status, filled, remaining, avgFillPrice) => {
+            if (id !== thisOrderId) return;
+            logMessage(`Order ${id} status: ${status} filled=${filled} remaining=${remaining} avg=${avgFillPrice}`);
+            if (['Filled', 'Cancelled', 'Inactive', 'Rejected'].includes(status)) {
+                ib.removeListener('orderStatus', onStatus);
+                resolve({ success: status === 'Filled', orderId: id, status, avgFillPrice });
             }
+        };
+        ib.on('orderStatus', onStatus);
 
-            // Log critical errors and reject the promise
-            console.error('Critical error placing order:', err.message);
-            reject({
-                success: false,
-                message: 'Failed to place the order.',
-                error: err.message,
-            });
-        });
+        try {
+            ib.placeOrder(thisOrderId, contract, order);
+        } catch (e) {
+            ib.removeListener('orderStatus', onStatus);
+            reject(e);
+        }
     });
 }
 
@@ -135,7 +207,7 @@ function disconnectIBKR() {
         logMessage('Disconnecting from IBKR API...');
         ib.disconnect();
     } else {
-        logMessage('IBKR API is not connected, no need to disconnect.');
+        logMessage('IBKR API is not connected.');
     }
 }
 
